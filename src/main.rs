@@ -1,7 +1,9 @@
-use std::fs::File;
-use std::io;
-use std::io::{BufReader, BufRead};
 use deku::prelude::*;
+use std::fs::File;
+use std::io::Read;
+
+const PCAP_HEADER_LEN: usize = 24;
+const PCAP_MAGIC: u32 = 0xa1b2c3d4;
 
 #[derive(Debug, PartialEq, DekuRead, DekuWrite)]
 #[deku(endian = "little")]
@@ -20,9 +22,10 @@ struct PcapHeader {
     linktype: u32,
 }
 
+
 #[derive(Debug, PartialEq, DekuRead, DekuWrite)]
 #[deku(endian = "little")]
-struct RecordHeader {
+struct PcapRecord {
     ts: u32,
     tn: u32,
     caplen: u32,
@@ -31,28 +34,40 @@ struct RecordHeader {
     data: Vec<u8>,
 }
 
-fn main() {
-    let file =  File::open("test.pcap").expect("Error: Cannot open file");
-    let mut reader = BufReader::new(file);
-
-    let buf = reader.fill_buf().unwrap();
-    let buflen = buf.len();
-    let ((rest, _), header) = PcapHeader::from_bytes((buf, 0)).unwrap();
-    let read = rest.len();
-    reader.consume(buflen - read);
-
-    println!("{header:02x?}");
-
-    for _ in 0..3 {
-        read_record(&mut reader);
+impl PcapRecord {
+    fn len(&self) -> usize {
+        self.data.len() + 16
     }
 }
 
-fn read_record(reader: &mut BufReader<File>) {
-    let buf = reader.fill_buf().unwrap();
-    let buflen = buf.len();
-    let ((rest, _), record) = RecordHeader::from_bytes((buf, 0)).unwrap();
-    let read = rest.len();
-    println!("{record:02x?}");
-    reader.consume(buflen - read);
+fn main() {
+    let mut file = File::open("test.pcap").expect("Error: Cannot open file");
+    let mut reader = Vec::<u8>::new();
+    let _ = file.read_to_end(&mut reader).expect("Cannot read file");
+
+    let header = read_header(&reader).;
+    println!("{header:02x?}");
+    let mut cursor = &reader[PCAP_HEADER_LEN..];
+
+    let records = read_all_records(&cursor);
+    println!("{}", records.len());
+}
+
+fn read_header(reader: &[u8]) -> Option<PcapHeader> {
+    let (_, header) = PcapHeader::from_bytes((reader, 0)).ok()?;
+    Some(header)
+}
+
+fn read_all_records(reader: &[u8]) -> Vec<PcapRecords> {
+    let mut records = Vec::<PcapRecord>::new();
+    while let Some(record) = read_record(cursor) {
+        cursor = &cursor[record.len()..];
+        records.push(record);
+    }
+    records
+}
+
+fn read_record(reader: &[u8]) -> Option<PcapRecord> {
+    let (_, record) = PcapRecord::from_bytes((reader, 0)).ok()?;
+    Some(record)
 }
