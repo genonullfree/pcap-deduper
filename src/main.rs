@@ -1,7 +1,27 @@
+use clap::Parser;
 use deku::prelude::*;
 use std::fs::File;
 use std::io::Read;
 use xxhash_rust::xxh3::xxh3_64;
+
+#[derive(Parser, Debug)]
+struct Opt {
+    /// Input pcap file to extract TCP streams from
+    #[arg(short, long, required = true)]
+    input: String,
+
+    /// Output name template
+    #[arg(short, long, default_value = "output.pcap")]
+    output: String,
+
+    /// Set window size in frames
+    #[arg(short, long, default_value = "3")]
+    window: usize,
+
+    /// Set window time in seconds
+    #[arg(short, long)]
+    time: Option<u32>,
+}
 
 const PCAP_HEADER_LEN: usize = 24;
 const PCAP_MAGIC: u32 = 0xa1b2c3d4;
@@ -68,38 +88,58 @@ impl PcapRecord {
         xxh3_64(&self.data)
     }
 
-    fn filter_dup(records: Vec<PcapRecord>, window: usize) -> Vec<PcapRecord> {
+    fn filter_dup(records: Vec<PcapRecord>, window: usize, time: Option<u32>) -> Vec<PcapRecord> {
         let mut hash_list = Vec::<u64>::new();
         let mut out = Vec::<PcapRecord>::new();
+        let mut prev_ts: u64 = 0;
 
         for (n, rec) in records.into_iter().enumerate() {
             let hash = rec.hash();
-            if !hash_list.contains(&hash) {
-                if hash_list.len() > window {
-                    hash_list.pop();
+            if hash_list.contains(&hash) {
+                if let Some(t) = time {
+                    let cur_ts: u64 = (rec.ts as u64 * 1000000) + rec.tn as u64;
+                    if cur_ts - prev_ts < t as u64 * 1000000 {
+                        println!("dupe detected within {t}sec! frame: {n}");
+                        continue;
+                    }
+                } else {
+                    println!("dupe detected! frame: {n}");
+                    continue;
                 }
-                hash_list.push(hash);
-                out.push(rec);
-            } else {
-                println!("dupe detected! frame: {n}");
             }
+            if hash_list.len() > window {
+                hash_list.pop();
+            }
+            hash_list.push(hash);
+            prev_ts = (rec.ts as u64 * 1000000) + rec.tn as u64;
+            out.push(rec);
         }
         out
     }
 }
 
 fn main() {
-    let mut file = File::open("test.pcap").expect("Error: Cannot open file");
+    let opt = Opt::parse();
+
+    let mut file = File::open(&opt.input).expect("Error: Cannot open file");
     let mut reader = Vec::<u8>::new();
     let _ = file.read_to_end(&mut reader).expect("Cannot read file");
 
-    let header = PcapHeader::read(&reader);
-    println!("{header:02x?}");
+    if let Some(header) = PcapHeader::read(&reader) {
+        println!("Loading {}...", opt.input);
 
-    let records = PcapRecord::read_all_records(&reader[PCAP_HEADER_LEN..]);
-    println!("raw: {}", records.len());
+        let records = PcapRecord::read_all_records(&reader[PCAP_HEADER_LEN..]);
+        let rlen = records.len();
 
-    let window = 2;
-    let filtered = PcapRecord::filter_dup(records, window);
-    println!("filtered: {} window: {window}", filtered.len());
+        let filtered = PcapRecord::filter_dup(records, opt.window, opt.time);
+        println!(
+            "original: {} filtered: {} window: {} removed: {}",
+            rlen,
+            filtered.len(),
+            opt.window,
+            rlen - filtered.len()
+        );
+    } else {
+        println!("Error: {} cannot be loaded as a pcap file", opt.input);
+    }
 }
