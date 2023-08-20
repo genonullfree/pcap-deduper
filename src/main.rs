@@ -22,6 +22,16 @@ struct PcapHeader {
     linktype: u32,
 }
 
+impl PcapHeader {
+    fn read(reader: &[u8]) -> Option<Self> {
+        let (_, header) = PcapHeader::from_bytes((reader, 0)).ok()?;
+        if header.magic == PCAP_MAGIC {
+            Some(header)
+        } else {
+            None
+        }
+    }
+}
 
 #[derive(Debug, PartialEq, DekuRead, DekuWrite)]
 #[deku(endian = "little")]
@@ -35,6 +45,19 @@ struct PcapRecord {
 }
 
 impl PcapRecord {
+    fn read_all_records(mut cursor: &[u8]) -> Vec<Self> {
+        let mut records = Vec::<Self>::new();
+        while let Some(record) = Self::read_record(cursor) {
+            cursor = &cursor[record.len()..];
+            records.push(record);
+        }
+        records
+    }
+
+    fn read_record(reader: &[u8]) -> Option<Self> {
+        let (_, record) = PcapRecord::from_bytes((reader, 0)).ok()?;
+        Some(record)
+    }
     fn len(&self) -> usize {
         self.data.len() + 16
     }
@@ -45,29 +68,9 @@ fn main() {
     let mut reader = Vec::<u8>::new();
     let _ = file.read_to_end(&mut reader).expect("Cannot read file");
 
-    let header = read_header(&reader).;
+    let header = PcapHeader::read(&reader);
     println!("{header:02x?}");
-    let mut cursor = &reader[PCAP_HEADER_LEN..];
 
-    let records = read_all_records(&cursor);
+    let records = PcapRecord::read_all_records(&reader[PCAP_HEADER_LEN..]);
     println!("{}", records.len());
-}
-
-fn read_header(reader: &[u8]) -> Option<PcapHeader> {
-    let (_, header) = PcapHeader::from_bytes((reader, 0)).ok()?;
-    Some(header)
-}
-
-fn read_all_records(reader: &[u8]) -> Vec<PcapRecords> {
-    let mut records = Vec::<PcapRecord>::new();
-    while let Some(record) = read_record(cursor) {
-        cursor = &cursor[record.len()..];
-        records.push(record);
-    }
-    records
-}
-
-fn read_record(reader: &[u8]) -> Option<PcapRecord> {
-    let (_, record) = PcapRecord::from_bytes((reader, 0)).ok()?;
-    Some(record)
 }
