@@ -53,9 +53,8 @@ impl PcapHeader {
         }
     }
 
-    fn write(&self, file: &mut File) {
-        let data = &self.to_bytes().unwrap();
-        file.write(&data).expect("Error writing header to file");
+    fn out(&self) -> Vec<u8> {
+        self.to_bytes().unwrap()
     }
 }
 
@@ -85,15 +84,16 @@ impl PcapRecord {
         Some(record)
     }
 
-    fn write_all(file: &mut File, records: &[Self]) {
+    fn write_all(records: &[Self]) -> Vec<u8> {
+        let mut out = Vec::<u8>::new();
         for r in records {
-            r.write(file);
+            out.append(&mut r.out());
         }
+        out
     }
 
-    fn write(&self, file: &mut File) {
-        file.write(&self.to_bytes().unwrap())
-            .expect("Error writing record to file");
+    fn out(&self) -> Vec<u8> {
+        self.to_bytes().unwrap()
     }
 
     fn len(&self) -> usize {
@@ -160,10 +160,15 @@ fn main() {
             rlen - filtered.len()
         );
 
+        println!("Preparing data to write...");
+        let mut data = header.out();
+        data.append(&mut PcapRecord::write_all(&filtered));
+
         println!("Writing output to: {}", opt.output);
         let mut output = File::create(&opt.output).expect("Error: Cannot create output file");
-        header.write(&mut output);
-        PcapRecord::write_all(&mut output, &filtered);
+        output
+            .write_all(&data)
+            .expect("Error writing to output file");
     } else {
         println!("Error: {} cannot be loaded as a pcap file", opt.input);
     }
