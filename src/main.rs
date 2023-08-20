@@ -1,6 +1,7 @@
 use deku::prelude::*;
 use std::fs::File;
 use std::io::Read;
+use xxhash_rust::xxh3::xxh3_64;
 
 const PCAP_HEADER_LEN: usize = 24;
 const PCAP_MAGIC: u32 = 0xa1b2c3d4;
@@ -58,8 +59,32 @@ impl PcapRecord {
         let (_, record) = PcapRecord::from_bytes((reader, 0)).ok()?;
         Some(record)
     }
+
     fn len(&self) -> usize {
         self.data.len() + 16
+    }
+
+    fn hash(&self) -> u64 {
+        xxh3_64(&self.data)
+    }
+
+    fn filter_dup(records: Vec<PcapRecord>, window: usize) -> Vec<PcapRecord> {
+        let mut hash_list = Vec::<u64>::new();
+        let mut out = Vec::<PcapRecord>::new();
+
+        for (n, rec) in records.into_iter().enumerate() {
+            let hash = rec.hash();
+            if !hash_list.contains(&hash) {
+                if hash_list.len() > window {
+                    hash_list.pop();
+                }
+                hash_list.push(hash);
+                out.push(rec);
+            } else {
+                println!("dupe detected! frame: {n}");
+            }
+        }
+        out
     }
 }
 
@@ -72,5 +97,9 @@ fn main() {
     println!("{header:02x?}");
 
     let records = PcapRecord::read_all_records(&reader[PCAP_HEADER_LEN..]);
-    println!("{}", records.len());
+    println!("raw: {}", records.len());
+
+    let window = 2;
+    let filtered = PcapRecord::filter_dup(records, window);
+    println!("filtered: {} window: {window}", filtered.len());
 }
