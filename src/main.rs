@@ -14,11 +14,11 @@ struct Opt {
     #[arg(short, long, default_value = "output.pcap")]
     output: String,
 
-    /// Set window size in frames
+    /// Set window size in frames (Set to "0" for max window size)
     #[arg(short, long, default_value = "3")]
     window: usize,
 
-    /// Set window time in seconds
+    /// Set window time in seconds (Optional)
     #[arg(short, long)]
     time: Option<f64>,
 }
@@ -127,7 +127,7 @@ impl PcapRecord {
                     continue;
                 }
             }
-            if hash_list.len() > window {
+            if hash_list.len() > window && window != 0 {
                 hash_list.pop();
             }
             hash_list.push(hash);
