@@ -1,7 +1,7 @@
 use clap::Parser;
 use deku::prelude::*;
 use std::fs::File;
-use std::io::Read;
+use std::io::{Read, Write};
 use xxhash_rust::xxh3::xxh3_64;
 
 #[derive(Parser, Debug)]
@@ -52,6 +52,11 @@ impl PcapHeader {
             None
         }
     }
+
+    fn write(&self, file: &mut File) {
+        let data = &self.to_bytes().unwrap();
+        file.write(&data).expect("Error writing header to file");
+    }
 }
 
 #[derive(Debug, PartialEq, DekuRead, DekuWrite)]
@@ -66,18 +71,29 @@ struct PcapRecord {
 }
 
 impl PcapRecord {
-    fn read_all_records(mut cursor: &[u8]) -> Vec<Self> {
+    fn read_all(mut cursor: &[u8]) -> Vec<Self> {
         let mut records = Vec::<Self>::new();
-        while let Some(record) = Self::read_record(cursor) {
+        while let Some(record) = Self::read(cursor) {
             cursor = &cursor[record.len()..];
             records.push(record);
         }
         records
     }
 
-    fn read_record(reader: &[u8]) -> Option<Self> {
+    fn read(reader: &[u8]) -> Option<Self> {
         let (_, record) = PcapRecord::from_bytes((reader, 0)).ok()?;
         Some(record)
+    }
+
+    fn write_all(file: &mut File, records: &[Self]) {
+        for r in records {
+            r.write(file);
+        }
+    }
+
+    fn write(&self, file: &mut File) {
+        file.write(&self.to_bytes().unwrap())
+            .expect("Error writing record to file");
     }
 
     fn len(&self) -> usize {
@@ -132,7 +148,7 @@ fn main() {
     if let Some(header) = PcapHeader::read(&reader) {
         println!("Loading {}...", opt.input);
 
-        let records = PcapRecord::read_all_records(&reader[PCAP_HEADER_LEN..]);
+        let records = PcapRecord::read_all(&reader[PCAP_HEADER_LEN..]);
         let rlen = records.len();
 
         let filtered = PcapRecord::filter_dup(records, opt.window, opt.time);
@@ -143,6 +159,11 @@ fn main() {
             opt.window,
             rlen - filtered.len()
         );
+
+        println!("Writing output to: {}", opt.output);
+        let mut output = File::create(&opt.output).expect("Error: Cannot create output file");
+        header.write(&mut output);
+        PcapRecord::write_all(&mut output, &filtered);
     } else {
         println!("Error: {} cannot be loaded as a pcap file", opt.input);
     }
