@@ -20,7 +20,7 @@ struct Opt {
 
     /// Set window time in seconds
     #[arg(short, long)]
-    time: Option<u32>,
+    time: Option<f64>,
 }
 
 const PCAP_HEADER_LEN: usize = 24;
@@ -88,18 +88,22 @@ impl PcapRecord {
         xxh3_64(&self.data)
     }
 
-    fn filter_dup(records: Vec<PcapRecord>, window: usize, time: Option<u32>) -> Vec<PcapRecord> {
+    fn filter_dup(records: Vec<PcapRecord>, window: usize, time: Option<f64>) -> Vec<PcapRecord> {
         let mut hash_list = Vec::<u64>::new();
         let mut out = Vec::<PcapRecord>::new();
-        let mut prev_ts: u64 = 0;
+        let mut prev_ts = 0f64;
 
         for (n, rec) in records.into_iter().enumerate() {
             let hash = rec.hash();
             if hash_list.contains(&hash) {
                 if let Some(t) = time {
-                    let cur_ts: u64 = (rec.ts as u64 * 1000000) + rec.tn as u64;
-                    if cur_ts - prev_ts < t as u64 * 1000000 {
-                        println!("dupe detected within {t}sec! frame: {n}");
+                    let cur_ts: f64 = rec.ts as f64 + (rec.tn as f64 / 1000000f64);
+                    if cur_ts - prev_ts < t {
+                        println!(
+                            "dupe detected within {:.3}sec! frame: {n}",
+                            cur_ts - prev_ts
+                        );
+                        prev_ts = cur_ts;
                         continue;
                     }
                 } else {
@@ -111,7 +115,7 @@ impl PcapRecord {
                 hash_list.pop();
             }
             hash_list.push(hash);
-            prev_ts = (rec.ts as u64 * 1000000) + rec.tn as u64;
+            prev_ts = rec.ts as f64 + (rec.tn as f64 / 1000000f64);
             out.push(rec);
         }
         out
