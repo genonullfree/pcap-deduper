@@ -51,7 +51,7 @@ enum Layer {
     Llc,
     /// Network layer (IP)
     Network,
-    /// Transport layer (TCP/UDP)
+    /// Transport layer (TCP/UDP/IGMP/etc.)
     Transport,
     /// Session layer (Payload)
     Session,
@@ -153,6 +153,11 @@ impl PcapRecord {
         xxh3_64(&self.data[offset..])
     }
 
+    fn hash_session(&self) -> u64 {
+        let offset = Packet::get_session_start(&self.data);
+        xxh3_64(&self.data[offset..])
+    }
+
     fn filter_dup(
         records: Vec<PcapRecord>,
         window: usize,
@@ -170,7 +175,7 @@ impl PcapRecord {
                     Layer::Llc => rec.hash_llc(),
                     Layer::Network => rec.hash_network(),
                     Layer::Transport => rec.hash_transport(),
-                    _ => todo!("TODO: Implement other layers"),
+                    Layer::Session => rec.hash_session(),
                 }
             } else {
                 rec.hash()
