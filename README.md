@@ -19,6 +19,7 @@ Options:
   -o, --output <OUTPUT>  Output name template [default: output.pcap]
   -w, --window <WINDOW>  Set window size in frames (Set to "0" for max window size) [default: 3]
   -t, --time <TIME>      Set window time in seconds (Optional)
+  -v, --verbose          Verbose output
   -h, --help             Print help
 ```
 
