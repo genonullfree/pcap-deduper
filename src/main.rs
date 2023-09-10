@@ -4,6 +4,9 @@ use std::fs::File;
 use std::io::{Read, Write};
 use xxhash_rust::xxh3::xxh3_64;
 
+mod packets;
+use crate::packets::Packet;
+
 #[derive(Parser, Debug)]
 struct Opt {
     /// Input pcap file to extract TCP streams from
@@ -21,6 +24,37 @@ struct Opt {
     /// Set window time in seconds (Optional)
     #[arg(short, long)]
     time: Option<f64>,
+
+    /// Select layer to compare
+    #[command(subcommand)]
+    layer: Option<Layer>,
+    /*
+    /// Compare DataLink (Ethernet) layer
+    #[arg(short, long)]
+    datalink: bool,
+
+    /// Compare Network (IP) layer
+    #[arg(short, long)]
+    network: bool,
+
+    /// Compare Transport (TCP/UDP) layer
+    #[arg(short, long)]
+    transport: bool,
+    */
+}
+
+#[derive(Parser, Debug, Clone)]
+enum Layer {
+    /// Ethernet layer (whole packet, lowest level)
+    Mac,
+    /// Logical Link Control (LLC, Vlan, Arp, etc)
+    Llc,
+    /// Network layer (IP)
+    Network,
+    /// Transport layer (TCP/UDP)
+    Transport,
+    /// Session layer (Payload)
+    Session,
 }
 
 const PCAP_HEADER_LEN: usize = 24;
@@ -104,13 +138,43 @@ impl PcapRecord {
         xxh3_64(&self.data)
     }
 
-    fn filter_dup(records: Vec<PcapRecord>, window: usize, time: Option<f64>) -> Vec<PcapRecord> {
+    fn hash_llc(&self) -> u64 {
+        let offset = Packet::get_llc_start();
+        xxh3_64(&self.data[offset..])
+    }
+
+    fn hash_network(&self) -> u64 {
+        let offset = Packet::get_network_start(&self.data);
+        xxh3_64(&self.data[offset..])
+    }
+
+    fn hash_transport(&self) -> u64 {
+        let offset = Packet::get_transport_start(&self.data);
+        xxh3_64(&self.data[offset..])
+    }
+
+    fn filter_dup(
+        records: Vec<PcapRecord>,
+        window: usize,
+        time: Option<f64>,
+        layer: Option<Layer>,
+    ) -> Vec<PcapRecord> {
         let mut hash_list = Vec::<u64>::new();
         let mut out = Vec::<PcapRecord>::new();
         let mut prev_ts = 0f64;
 
         for (n, rec) in records.into_iter().enumerate() {
-            let hash = rec.hash();
+            let hash = if let Some(layer) = &layer {
+                match layer {
+                    Layer::Mac => rec.hash(),
+                    Layer::Llc => rec.hash_llc(),
+                    Layer::Network => rec.hash_network(),
+                    Layer::Transport => rec.hash_transport(),
+                    _ => todo!("TODO: Implement other layers"),
+                }
+            } else {
+                rec.hash()
+            };
             if hash_list.contains(&hash) {
                 if let Some(t) = time {
                     let cur_ts: f64 = rec.ts as f64 + (rec.tn as f64 / 1000000f64);
@@ -151,7 +215,7 @@ fn main() {
         let records = PcapRecord::read_all(&reader[PCAP_HEADER_LEN..]);
         let rlen = records.len();
 
-        let filtered = PcapRecord::filter_dup(records, opt.window, opt.time);
+        let filtered = PcapRecord::filter_dup(records, opt.window, opt.time, opt.layer);
         println!(
             "original: {} filtered: {} window: {} removed: {}",
             rlen,
